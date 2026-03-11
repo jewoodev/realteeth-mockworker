@@ -1,24 +1,30 @@
 package com.realteeth.mockworker.client
 
 import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.runBlocking
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.boot.context.event.ApplicationReadyEvent
-import org.springframework.context.event.EventListener
+import org.springframework.boot.ApplicationArguments
+import org.springframework.boot.ApplicationRunner
+import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatusCode
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.awaitBody
 import org.springframework.web.reactive.function.client.bodyToMono
 
+@Order(1)
 @Component
 class MockWorkerClient(
     webClientBuilder: WebClient.Builder,
     @Value($$"${mockworker.base-url}") baseUrl: String
-) {
+) : ApplicationRunner {
     private val client = webClientBuilder.baseUrl(baseUrl).build()
     private var apiKey: String? = null
 
-    @EventListener(ApplicationReadyEvent::class)
+    override fun run(args: ApplicationArguments?) {
+        runBlocking { setApiKey() }
+    }
+
     private suspend fun setApiKey() {
         apiKey = client.post()
             .uri("/mock/auth/issue-key")
