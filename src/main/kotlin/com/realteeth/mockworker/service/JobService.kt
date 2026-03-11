@@ -10,12 +10,14 @@ import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 
 @Service
 class JobService(
     private val jobRepository: JobRepository,
     private val mockWorkerClient: MockWorkerClient,
     private val backgroundScope: CoroutineScope,
+    private val transactionTemplate: TransactionTemplate,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -36,7 +38,10 @@ class JobService(
         }
 
         // 백그라운드에서 Mock Worker 호출
-        backgroundScope.launch { submitToMockWorker(job.id) }
+        backgroundScope.launch {
+            submitToMockWorker(job.id)
+            callMockWorkerAndSave(job.id)
+        }
 
         return job
     }
@@ -54,71 +59,71 @@ class JobService(
     /**
      * Mock Worker에 작업을 제출하고 상태를 PROCESSING으로 전환한다.
      */
-    @Transactional
     fun submitToMockWorker(jobId: Long) {
-        val job = jobRepository.findById(jobId).orElse(null) ?: return
+        transactionTemplate.executeWithoutResult {
+            val job = jobRepository.findById(jobId).orElse(null) ?: return@executeWithoutResult
+            if (job.status != JobStatus.PENDING) return@executeWithoutResult
 
-        if (job.status != JobStatus.PENDING) return
-
-        try {
-            job.transitionTo(JobStatus.PROCESSING)
-            jobRepository.save(job)
-        } catch (e: IllegalArgumentException) {
-            log.warn("State transition failed for job $jobId: ${e.message}")
-            return
+            try {
+                job.transitionTo(JobStatus.PROCESSING)
+                jobRepository.save(job)
+            } catch (e: IllegalArgumentException) {
+                log.warn("State transition failed for job $jobId: ${e.message}")
+            }
         }
     }
 
     /**
-     * 백그라운드에서 Mock Worker를 호출하고 결과를 저장한다.
+     * Mock Worker를 호출하고 결과를 저장한다.
      */
-    @Transactional
     suspend fun callMockWorkerAndSave(jobId: Long) {
-        val job = jobRepository.findById(jobId).orElse(null) ?: return
+        val imageUrl = transactionTemplate.execute {
+            jobRepository.findById(jobId).orElse(null)?.imageUrl
+        } ?: return
 
         try {
-            val response = mockWorkerClient.requestProcess(job.imageUrl)
-            updateJobWithMockResponse(jobId, response.jobId)
+            val response = mockWorkerClient.requestProcess(imageUrl)
+
+            transactionTemplate.executeWithoutResult {
+                val job = jobRepository.findById(jobId).orElse(null) ?: return@executeWithoutResult
+                job.mockJobId = response.jobId
+                jobRepository.save(job)
+            }
         } catch (e: Exception) {
             log.error("Failed to call Mock Worker for job $jobId", e)
             markJobFailed(jobId, e.message ?: "Unknown error")
         }
     }
 
-    @Transactional
-    fun updateJobWithMockResponse(jobId: Long, mockJobId: String) {
-        val job = jobRepository.findById(jobId).orElse(null) ?: return
-        job.mockJobId = mockJobId
-        jobRepository.save(job)
-    }
-
-    @Transactional
     fun markJobFailed(jobId: Long, errorMessage: String) {
-        val job = jobRepository.findById(jobId).orElse(null) ?: return
-        if (job.status == JobStatus.COMPLETED) return
+        transactionTemplate.executeWithoutResult {
+            val job = jobRepository.findById(jobId).orElse(null) ?: return@executeWithoutResult
+            if (job.status == JobStatus.COMPLETED) return@executeWithoutResult
 
-        try {
-            if (job.status != JobStatus.FAILED) {
-                job.transitionTo(JobStatus.FAILED)
+            try {
+                if (job.status != JobStatus.FAILED) {
+                    job.transitionTo(JobStatus.FAILED)
+                }
+                job.errorMessage = errorMessage
+                jobRepository.save(job)
+            } catch (e: IllegalArgumentException) {
+                log.warn("Cannot mark job $jobId as FAILED: ${e.message}")
             }
-            job.errorMessage = errorMessage
-            jobRepository.save(job)
-        } catch (e: IllegalArgumentException) {
-            log.warn("Cannot mark job $jobId as FAILED: ${e.message}")
         }
     }
 
-    @Transactional
     fun markJobCompleted(jobId: Long, result: String?) {
-        val job = jobRepository.findById(jobId).orElse(null) ?: return
-        if (job.status == JobStatus.COMPLETED) return
+        transactionTemplate.executeWithoutResult {
+            val job = jobRepository.findById(jobId).orElse(null) ?: return@executeWithoutResult
+            if (job.status == JobStatus.COMPLETED) return@executeWithoutResult
 
-        try {
-            job.transitionTo(JobStatus.COMPLETED)
-            job.result = result
-            jobRepository.save(job)
-        } catch (e: IllegalArgumentException) {
-            log.warn("Cannot mark job $jobId as COMPLETED: ${e.message}")
+            try {
+                job.transitionTo(JobStatus.COMPLETED)
+                job.result = result
+                jobRepository.save(job)
+            } catch (e: IllegalArgumentException) {
+                log.warn("Cannot mark job $jobId as COMPLETED: ${e.message}")
+            }
         }
     }
 }

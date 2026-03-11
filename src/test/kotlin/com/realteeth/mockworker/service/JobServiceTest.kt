@@ -12,7 +12,11 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.springframework.transaction.TransactionStatus
+import org.springframework.transaction.support.TransactionCallback
+import org.springframework.transaction.support.TransactionTemplate
 import java.util.*
+import java.util.function.Consumer
 import kotlin.test.assertEquals
 
 class JobServiceTest {
@@ -20,12 +24,22 @@ class JobServiceTest {
     private val jobRepository = mockk<JobRepository>()
     private val mockWorkerClient = mockk<MockWorkerClient>()
     private val backgroundScope = CoroutineScope(UnconfinedTestDispatcher())
+    private val transactionTemplate = mockk<TransactionTemplate>()
     private lateinit var jobService: JobService
 
     @BeforeEach
     fun setup() {
         clearAllMocks()
-        jobService = JobService(jobRepository, mockWorkerClient, backgroundScope)
+
+        // TransactionTemplate이 콜백을 즉시 실행하도록 설정
+        every { transactionTemplate.execute(any<TransactionCallback<*>>()) } answers {
+            firstArg<TransactionCallback<*>>().doInTransaction(mockk())
+        }
+        every { transactionTemplate.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            firstArg<Consumer<TransactionStatus>>().accept(mockk())
+        }
+
+        jobService = JobService(jobRepository, mockWorkerClient, backgroundScope, transactionTemplate)
     }
 
     @Test
@@ -44,8 +58,10 @@ class JobServiceTest {
         val newJob = Job(id = 2, idempotencyKey = "key2", imageUrl = "http://img.png")
         every { jobRepository.findByIdempotencyKey("key2") } returns null
         every { jobRepository.save(any()) } returns newJob
-        // submitToMockWorker will be called in background
+        // submitToMockWorker and callMockWorkerAndSave will be called in background
         every { jobRepository.findById(2L) } returns Optional.of(newJob)
+        coEvery { mockWorkerClient.requestProcess("http://img.png") } returns
+            ProcessStartResponse(jobId = "mock-123", status = "PROCESSING")
 
         val result = jobService.createJob("key2", "http://img.png")
 
