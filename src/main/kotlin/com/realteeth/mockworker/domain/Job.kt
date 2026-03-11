@@ -1,8 +1,10 @@
 package com.realteeth.mockworker.domain
 
 import jakarta.persistence.*
+import org.hibernate.annotations.DynamicUpdate
 import java.time.Instant
 
+@DynamicUpdate
 @Entity
 @Table(
     name = "jobs",
