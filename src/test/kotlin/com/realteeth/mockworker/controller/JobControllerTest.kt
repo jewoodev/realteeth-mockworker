@@ -33,7 +33,7 @@ class JobControllerTest {
         val job = Job(id = 1, idempotencyKey = "key1", imageUrl = "http://img.png")
         every { jobService.createJob("key1", "http://img.png") } returns job
 
-        mockMvc.post("/api/jobs") {
+        mockMvc.post("/api/jobs/create") {
             header("X-Idempotency-Key", "key1")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(CreateJobRequest("http://img.png"))
@@ -51,7 +51,7 @@ class JobControllerTest {
         job.transitionTo(JobStatus.PROCESSING)
         every { jobService.createJob("key1", "http://img.png") } returns job
 
-        mockMvc.post("/api/jobs") {
+        mockMvc.post("/api/jobs/create") {
             header("X-Idempotency-Key", "key1")
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(CreateJobRequest("http://img.png"))
@@ -64,7 +64,7 @@ class JobControllerTest {
 
     @Test
     fun `POST without idempotency key returns 400`() {
-        mockMvc.post("/api/jobs") {
+        mockMvc.post("/api/jobs/create") {
             contentType = MediaType.APPLICATION_JSON
             content = objectMapper.writeValueAsString(CreateJobRequest("http://img.png"))
         }.andExpect {

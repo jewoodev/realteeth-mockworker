@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/api/jobs")
 class JobController(private val jobService: JobService) {
 
-    @PostMapping
+    @PostMapping("/create")
     fun createJob(
         @RequestHeader("X-Idempotency-Key") idempotencyKey: String,
         @RequestBody request: CreateJobRequest,
