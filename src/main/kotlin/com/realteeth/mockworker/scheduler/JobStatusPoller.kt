@@ -22,7 +22,7 @@ class JobStatusPoller(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @Scheduled(fixedDelay = 3000)
+    @Scheduled(fixedDelayString = $$"${mockworker.poll-interval-ms:3000}")
     fun pollProcessingJobs() {
         val processingJobs = jobRepository.findByStatus(JobStatus.PROCESSING)
             .filter { it.mockJobId != null }
